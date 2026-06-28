@@ -12,7 +12,6 @@ class MockDB:
             "Cardiologie": [],
             "Pédiatrie": []
         }
-        
         # ══════════════════════════════════════
         #  Historique des patients traités
         # ══════════════════════════════════════
@@ -21,6 +20,9 @@ class MockDB:
             "Cardiologie": [],
             "Pédiatrie": []
         }
+        
+        # Ordonnances numériques
+        self.prescriptions: List[Dict[str, Any]] = []
         
         # ══════════════════════════════════════
         #  Compteurs statistiques
@@ -293,6 +295,77 @@ class MockDB:
                 pharmacy["transactions"].append(transaction)
                 return True
         return False
+
+    # ══════════════════════════════════════
+    #  Prescriptions (Ordonnances)
+    # ══════════════════════════════════════
+    def create_prescription(self, ticket_id: str, doctor_name: str, notes: str, medicines: List[Dict[str, Any]]) -> Dict[str, Any]:
+        prescription = {
+            "id": str(uuid.uuid4()),
+            "ticketId": ticket_id,
+            "doctorName": doctor_name,
+            "date": datetime.now().isoformat(),
+            "notes": notes,
+            "medicines": medicines, # format: [{"name": "Para", "quantity": 2, "dosage": "1 matin et soir"}]
+            "status": "pending" # pending, delivered
+        }
+        self.prescriptions.append(prescription)
+        return prescription
+
+    def get_prescriptions(self, status: str = None) -> List[Dict[str, Any]]:
+        if status:
+            return [p for p in self.prescriptions if p["status"] == status]
+        return self.prescriptions
+
+    def get_patient_prescriptions(self, ticket_id: str) -> List[Dict[str, Any]]:
+        return [p for p in self.prescriptions if p["ticketId"] == ticket_id]
+
+    def deliver_prescription(self, prescription_id: str, pharmacy_id: int, pharmacist_name: str) -> bool:
+        # Find prescription
+        prescription = None
+        for p in self.prescriptions:
+            if p["id"] == prescription_id:
+                prescription = p
+                break
+        
+        if not prescription or prescription["status"] == "delivered":
+            return False
+            
+        # Deduct stock
+        for med in prescription["medicines"]:
+            med_name = med["name"]
+            qty_needed = med["quantity"]
+            
+            # Find medicine in pharmacy stock and deduct
+            for pharmacy in self.pharmacies:
+                if pharmacy["id"] == pharmacy_id:
+                    for item in pharmacy["stock"]:
+                        if item["name"].lower() == med_name.lower():
+                            if item["quantity"] >= qty_needed:
+                                item["quantity"] -= qty_needed
+                                item["inStock"] = item["quantity"] > 0
+                                # Log transaction
+                                self.log_transaction(pharmacy_id, med_name, "SORTIE (Ordonnance)", qty_needed, pharmacist_name)
+                            break
+                            
+        prescription["status"] = "delivered"
+        prescription["deliveredAt"] = datetime.now().isoformat()
+        prescription["deliveredBy"] = pharmacist_name
+        return True
+
+    def check_availability(self) -> List[Dict[str, Any]]:
+        # Returns a list of medicines and whether they are available in ANY pharmacy
+        # Does NOT return exact quantities
+        availability = {}
+        for pharmacy in self.pharmacies:
+            for item in pharmacy["stock"]:
+                name = item["name"]
+                if name not in availability:
+                    availability[name] = {"name": name, "available": item["inStock"], "category": item.get("category", "Général")}
+                else:
+                    if item["inStock"]:
+                        availability[name]["available"] = True
+        return list(availability.values())
 
 # Instance globale
 db = MockDB()
