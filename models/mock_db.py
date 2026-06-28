@@ -81,10 +81,11 @@ class MockDB:
                 "latitude": 14.6672,
                 "longitude": -17.4336,
                 "stock": [
-                    {"name": "Paracétamol 500mg", "inStock": True},
-                    {"name": "Amoxicilline 1g", "inStock": True},
-                    {"name": "Artemether/Lumefantrine", "inStock": False}
-                ]
+                    {"name": "Paracétamol 500mg", "inStock": True, "quantity": 150, "threshold": 50, "category": "Analgésiques", "expirationDate": "2027-12-31"},
+                    {"name": "Amoxicilline 1g", "inStock": True, "quantity": 12, "threshold": 20, "category": "Antibiotiques", "expirationDate": "2026-08-15"},
+                    {"name": "Artemether/Lumefantrine", "inStock": False, "quantity": 0, "threshold": 10, "category": "Antipaludiques", "expirationDate": "2026-10-01"}
+                ],
+                "transactions": []
             },
             {
                 "id": 2,
@@ -93,9 +94,10 @@ class MockDB:
                 "latitude": 14.6631,
                 "longitude": -17.4340,
                 "stock": [
-                    {"name": "Paracétamol 500mg", "inStock": True},
-                    {"name": "Amoxicilline 1g", "inStock": False},
-                ]
+                    {"name": "Paracétamol 500mg", "inStock": True, "quantity": 500, "threshold": 100, "category": "Analgésiques", "expirationDate": "2028-01-01"},
+                    {"name": "Amoxicilline 1g", "inStock": False, "quantity": 0, "threshold": 50, "category": "Antibiotiques", "expirationDate": "2026-09-01"},
+                ],
+                "transactions": []
             }
         ]
 
@@ -244,17 +246,28 @@ class MockDB:
     # ══════════════════════════════════════
     #  Pharmacie
     # ══════════════════════════════════════
-    def update_stock(self, pharmacy_id: int, medicine_name: str, in_stock: bool) -> bool:
+    def update_stock(self, pharmacy_id: int, medicine_name: str, quantity: int, threshold: int = 10, category: str = "Général", expiration_date: str = "2099-12-31", in_stock: bool = None) -> bool:
         for pharmacy in self.pharmacies:
             if pharmacy["id"] == pharmacy_id:
                 # Chercher si le médicament existe déjà
                 for item in pharmacy["stock"]:
                     if item["name"].lower() == medicine_name.lower():
-                        item["inStock"] = in_stock
+                        item["quantity"] = quantity
+                        item["inStock"] = quantity > 0
+                        item["threshold"] = threshold
+                        item["category"] = category
+                        item["expirationDate"] = expiration_date
                         return True
                 
                 # S'il n'existe pas, l'ajouter
-                pharmacy["stock"].append({"name": medicine_name, "inStock": in_stock})
+                pharmacy["stock"].append({
+                    "name": medicine_name, 
+                    "inStock": quantity > 0,
+                    "quantity": quantity,
+                    "threshold": threshold,
+                    "category": category,
+                    "expirationDate": expiration_date
+                })
                 return True
         return False
 
@@ -264,6 +277,21 @@ class MockDB:
                 initial_length = len(pharmacy["stock"])
                 pharmacy["stock"] = [item for item in pharmacy["stock"] if item["name"].lower() != medicine_name.lower()]
                 return len(pharmacy["stock"]) < initial_length
+        return False
+
+    def log_transaction(self, pharmacy_id: int, medicine_name: str, type: str, quantity: int, user: str):
+        for pharmacy in self.pharmacies:
+            if pharmacy["id"] == pharmacy_id:
+                transaction = {
+                    "id": str(uuid.uuid4()),
+                    "date": datetime.now().isoformat(),
+                    "medicine": medicine_name,
+                    "type": type, # "ENTREE" or "SORTIE"
+                    "quantity": quantity,
+                    "user": user
+                }
+                pharmacy["transactions"].append(transaction)
+                return True
         return False
 
 # Instance globale

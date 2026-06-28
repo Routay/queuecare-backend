@@ -6,7 +6,16 @@ router = APIRouter()
 
 class StockUpdate(BaseModel):
     name: str
-    inStock: bool
+    quantity: int
+    threshold: int = 10
+    category: str = "Général"
+    expirationDate: str = "2099-12-31"
+
+class TransactionLog(BaseModel):
+    medicine: str
+    type: str
+    quantity: int
+    user: str
 
 @router.get("/")
 async def get_pharmacies():
@@ -14,7 +23,14 @@ async def get_pharmacies():
 
 @router.put("/{pharmacy_id}/stock")
 async def update_pharmacy_stock(pharmacy_id: int, request: StockUpdate):
-    success = db.update_stock(pharmacy_id, request.name, request.inStock)
+    success = db.update_stock(
+        pharmacy_id, 
+        request.name, 
+        request.quantity, 
+        request.threshold, 
+        request.category, 
+        request.expirationDate
+    )
     if not success:
         raise HTTPException(status_code=404, detail="Pharmacy not found")
     return {"message": "Stock updated successfully"}
@@ -25,3 +41,10 @@ async def delete_pharmacy_stock(pharmacy_id: int, medicine_name: str):
     if not success:
         raise HTTPException(status_code=404, detail="Pharmacy or medicine not found")
     return {"message": "Medicine removed successfully"}
+
+@router.post("/{pharmacy_id}/transactions")
+async def log_transaction(pharmacy_id: int, request: TransactionLog):
+    success = db.log_transaction(pharmacy_id, request.medicine, request.type, request.quantity, request.user)
+    if not success:
+        raise HTTPException(status_code=404, detail="Pharmacy not found")
+    return {"message": "Transaction logged successfully"}
