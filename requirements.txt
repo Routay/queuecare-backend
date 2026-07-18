@@ -2,3 +2,6 @@ fastapi
 uvicorn
 websockets
 pydantic
+sqlalchemy
+pytest
+httpx

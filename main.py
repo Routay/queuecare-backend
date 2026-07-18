@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api import queue_router, pharmacy_router, auth_router, consultation_router, appointment_router
+from core.database import engine
+from models import schema
+
+schema.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="QueueCare SN - Backend API")
 

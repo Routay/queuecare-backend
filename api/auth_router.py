@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from models.mock_db import db
+from sqlalchemy.orm import Session
+from core.database import get_db
+from models.schema import User
 import uuid
 
 router = APIRouter()
@@ -16,12 +18,12 @@ active_tokens: dict = {}
 
 
 @router.post("/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Authentifie un médecin ou agent médical.
     
     Retourne un token de session et les informations du profil.
     """
-    user = db.authenticate(request.username, request.password)
+    user = db.query(User).filter(User.username == request.username, User.password == request.password).first()
     
     if not user:
         raise HTTPException(
@@ -29,13 +31,22 @@ async def login(request: LoginRequest):
             detail="Identifiants incorrects. Vérifiez votre nom d'utilisateur et mot de passe."
         )
     
+    user_data = {
+        "id": user.id,
+        "username": user.username,
+        "fullName": user.fullName,
+        "role": user.role,
+        "department": user.department,
+        "avatar": user.avatar
+    }
+    
     # Générer un token de session simple
     token = str(uuid.uuid4())
-    active_tokens[token] = user
+    active_tokens[token] = user_data
     
     return {
         "token": token,
-        "user": user
+        "user": user_data
     }
 
 
