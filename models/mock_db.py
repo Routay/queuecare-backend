@@ -25,6 +25,12 @@ class MockDB:
         self.prescriptions: List[Dict[str, Any]] = []
         
         # ══════════════════════════════════════
+        #  Rendez-vous
+        # ══════════════════════════════════════
+        self.appointments: List[Dict[str, Any]] = []
+        self.availabilities: List[Dict[str, Any]] = []
+        
+        # ══════════════════════════════════════
         #  Compteurs statistiques
         # ══════════════════════════════════════
         self.stats = {
@@ -366,6 +372,74 @@ class MockDB:
                     if item["inStock"]:
                         availability[name]["available"] = True
         return list(availability.values())
+
+    # ══════════════════════════════════════
+    #  Disponibilités & Rendez-vous
+    # ══════════════════════════════════════
+    def add_availability(self, doctor_id: str, date: str, start_time: str, end_time: str) -> Dict[str, Any]:
+        avail = {
+            "id": str(uuid.uuid4()),
+            "doctorId": doctor_id,
+            "date": date,
+            "startTime": start_time,
+            "endTime": end_time,
+            "isBooked": False
+        }
+        self.availabilities.append(avail)
+        return avail
+
+    def get_availabilities(self, doctor_id: str = None, date: str = None) -> List[Dict[str, Any]]:
+        avails = self.availabilities
+        if doctor_id:
+            avails = [a for a in avails if a["doctorId"] == doctor_id]
+        if date:
+            avails = [a for a in avails if a["date"] == date]
+        return avails
+
+    def book_appointment(self, patient_name: str, patient_phone: str, availability_id: str, reason: str = "") -> Dict[str, Any]:
+        # Trouver la disponibilité
+        avail = next((a for a in self.availabilities if a["id"] == availability_id), None)
+        if not avail or avail["isBooked"]:
+            return {"error": "Disponibilité invalide ou déjà réservée"}
+            
+        avail["isBooked"] = True
+        
+        appointment = {
+            "id": str(uuid.uuid4()),
+            "availabilityId": availability_id,
+            "doctorId": avail["doctorId"],
+            "patientName": patient_name,
+            "patientPhone": patient_phone,
+            "date": avail["date"],
+            "startTime": avail["startTime"],
+            "endTime": avail["endTime"],
+            "reason": reason,
+            "status": "pending", # pending, confirmed, cancelled, completed
+            "createdAt": datetime.now().isoformat()
+        }
+        self.appointments.append(appointment)
+        return appointment
+
+    def get_appointments(self, doctor_id: str = None, patient_phone: str = None) -> List[Dict[str, Any]]:
+        apps = self.appointments
+        if doctor_id:
+            apps = [a for a in apps if a["doctorId"] == doctor_id]
+        if patient_phone:
+            apps = [a for a in apps if a["patientPhone"] == patient_phone]
+        return apps
+
+    def update_appointment_status(self, appointment_id: str, status: str) -> bool:
+        for app in self.appointments:
+            if app["id"] == appointment_id:
+                app["status"] = status
+                if status == "cancelled":
+                    # Libérer la disponibilité
+                    for avail in self.availabilities:
+                        if avail["id"] == app["availabilityId"]:
+                            avail["isBooked"] = False
+                            break
+                return True
+        return False
 
 # Instance globale
 db = MockDB()

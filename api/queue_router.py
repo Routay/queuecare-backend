@@ -112,6 +112,26 @@ async def get_department_history(department: str):
     """Retourne l'historique des patients traités pour un département donné."""
     return db.get_history(department)
 
+@router.get("/history/patient/{ticket_id}")
+async def get_patient_record(ticket_id: str):
+    """Retourne le dossier médical (historique + ordonnances) pour un ticket donné."""
+    history_entry = None
+    for dept_history in db.history.values():
+        for entry in dept_history:
+            if entry["id"] == ticket_id:
+                history_entry = entry
+                break
+        if history_entry:
+            break
+            
+    prescriptions = db.get_patient_prescriptions(ticket_id)
+    
+    return {
+        "ticketId": ticket_id,
+        "visitInfo": history_entry,
+        "prescriptions": prescriptions
+    }
+
 
 # ══════════════════════════════════════
 #  Statistiques en temps réel

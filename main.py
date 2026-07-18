@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api import queue_router, pharmacy_router, auth_router, consultation_router
+from api import queue_router, pharmacy_router, auth_router, consultation_router, appointment_router
 
 app = FastAPI(title="QueueCare SN - Backend API")
 
@@ -18,6 +18,7 @@ app.include_router(auth_router.router, prefix="/auth", tags=["Authentification"]
 app.include_router(queue_router.router, prefix="/queue", tags=["Queue"])
 app.include_router(pharmacy_router.router, prefix="/pharmacies", tags=["Pharmacies"])
 app.include_router(consultation_router.router, prefix="/consultations", tags=["Consultations"])
+app.include_router(appointment_router.router, prefix="/appointments", tags=["Rendez-vous"])
 
 @app.get("/")
 async def root():
