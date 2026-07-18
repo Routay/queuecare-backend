@@ -7,6 +7,12 @@ import uuid
 def generate_uuid():
     return str(uuid.uuid4())
 
+class Hospital(Base):
+    __tablename__ = "hospitals"
+    id = Column(String, primary_key=True, default=generate_uuid)
+    name = Column(String, unique=True, index=True)
+    address = Column(String)
+
 class User(Base):
     __tablename__ = "users"
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -16,6 +22,7 @@ class User(Base):
     role = Column(String)
     department = Column(String)
     avatar = Column(String)
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=True)
 
 class QueueTicket(Base):
     __tablename__ = "queue_tickets"
@@ -26,6 +33,7 @@ class QueueTicket(Base):
     estimatedWaitTime = Column(Integer)
     timestamp = Column(String)
     status = Column(String, default="waiting")
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=True)
 
 class HistoryEntry(Base):
     __tablename__ = "history_entries"
@@ -37,6 +45,7 @@ class HistoryEntry(Base):
     waitMinutes = Column(Integer)
     treatedBy = Column(String)
     status = Column(String, default="treated")
+    hospital_id = Column(String, ForeignKey("hospitals.id"), nullable=True)
 
 class Pharmacy(Base):
     __tablename__ = "pharmacies"
@@ -119,3 +128,14 @@ class Appointment(Base):
     reason = Column(String)
     status = Column(String, default="pending")
     createdAt = Column(String, default=lambda: datetime.now().isoformat())
+
+class PaymentReceipt(Base):
+    __tablename__ = "payment_receipts"
+    id = Column(String, primary_key=True, default=generate_uuid)
+    patientName = Column(String)
+    patientPhone = Column(String)
+    type = Column(String) # 'ticket' or 'appointment'
+    amount = Column(Integer)
+    operator = Column(String) # 'Wave' or 'Orange Money'
+    date = Column(String, default=lambda: datetime.now().isoformat())
+    status = Column(String, default="paid")

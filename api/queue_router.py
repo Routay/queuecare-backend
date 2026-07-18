@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -12,19 +12,23 @@ router = APIRouter()
 
 class TicketRequest(BaseModel):
     department: str = "Consultation Générale"
+    hospital_id: str
 
 class CallNextRequest(BaseModel):
     doctorName: str = "Médecin"
+    hospital_id: str
 
 @router.post("/ticket")
 async def create_ticket(request: TicketRequest, db: Session = Depends(get_db)):
-    """Créer un nouveau ticket pour un patient dans un département donné."""
-    # Nombre de tickets total pour générer un ID
+    """Créer un nouveau ticket pour un patient dans un hôpital et département donnés."""
     total_tickets = db.query(QueueTicket).count() + db.query(HistoryEntry).count()
     ticket_number = f"A-{total_tickets + 100}"
     
-    # Trouver le nombre de patients en attente
-    waiting_count = db.query(QueueTicket).filter(QueueTicket.department == request.department, QueueTicket.status == "waiting").count()
+    waiting_count = db.query(QueueTicket).filter(
+        QueueTicket.department == request.department, 
+        QueueTicket.hospital_id == request.hospital_id,
+        QueueTicket.status == "waiting"
+    ).count()
     position = waiting_count + 1
     
     ticket = QueueTicket(
@@ -33,29 +37,34 @@ async def create_ticket(request: TicketRequest, db: Session = Depends(get_db)):
         position=position,
         estimatedWaitTime=position * 15,
         timestamp=datetime.now().isoformat(),
-        status="waiting"
+        status="waiting",
+        hospital_id=request.hospital_id
     )
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
     
-    # Notifier les portails médicaux du changement
-    await manager.broadcast_to_dashboard({"type": "queue_update", "department": request.department})
+    await manager.broadcast_to_dashboard({"type": "queue_update", "department": request.department, "hospital_id": request.hospital_id})
     
     return {
         "id": ticket.id,
         "ticketNumber": ticket.ticketNumber,
         "department": ticket.department,
+        "hospital_id": ticket.hospital_id,
         "position": ticket.position,
         "estimatedWaitTime": ticket.estimatedWaitTime,
         "timestamp": ticket.timestamp,
         "status": ticket.status
     }
 
-@router.get("/{department}")
-async def get_queue(department: str, db: Session = Depends(get_db)):
-    """Retourne la liste des patients en attente pour un service donné."""
-    queue = db.query(QueueTicket).filter(QueueTicket.department == department, QueueTicket.status == "waiting").order_by(QueueTicket.timestamp).all()
+@router.get("/{hospital_id}/{department}")
+async def get_queue(hospital_id: str, department: str, db: Session = Depends(get_db)):
+    """Retourne la liste des patients en attente pour un hôpital et service donné."""
+    queue = db.query(QueueTicket).filter(
+        QueueTicket.hospital_id == hospital_id,
+        QueueTicket.department == department, 
+        QueueTicket.status == "waiting"
+    ).order_by(QueueTicket.timestamp).all()
     patients = [{
         "id": t.id,
         "ticketNumber": t.ticketNumber,
@@ -71,25 +80,31 @@ async def get_queue(department: str, db: Session = Depends(get_db)):
         "total": len(patients)
     }
 
-@router.get("/departments/list")
-async def get_departments(db: Session = Depends(get_db)):
-    """Retourne la liste de tous les départements et le nombre de patients en attente."""
-    # Obtenir tous les départements uniques
-    deps = db.query(QueueTicket.department).distinct().all()
+@router.get("/{hospital_id}/departments/list")
+async def get_departments(hospital_id: str, db: Session = Depends(get_db)):
+    """Retourne la liste des départements d'un hôpital et le nombre d'attente."""
+    deps = db.query(QueueTicket.department).filter(QueueTicket.hospital_id == hospital_id).distinct().all()
     departments = []
     for (dept_name,) in deps:
-        waiting = db.query(QueueTicket).filter(QueueTicket.department == dept_name, QueueTicket.status == "waiting").count()
+        waiting = db.query(QueueTicket).filter(
+            QueueTicket.hospital_id == hospital_id,
+            QueueTicket.department == dept_name, 
+            QueueTicket.status == "waiting"
+        ).count()
         departments.append({
             "name": dept_name,
             "waitingCount": waiting
         })
     return departments
 
-@router.post("/{department}/next")
-async def call_next_patient(department: str, request: CallNextRequest, db: Session = Depends(get_db)):
-    """Appelle le patient suivant dans la file d'attente."""
-    # Prendre le premier patient en attente
-    first_ticket = db.query(QueueTicket).filter(QueueTicket.department == department, QueueTicket.status == "waiting").order_by(QueueTicket.timestamp).first()
+@router.post("/{hospital_id}/{department}/next")
+async def call_next_patient(hospital_id: str, department: str, request: CallNextRequest, db: Session = Depends(get_db)):
+    """Appelle le patient suivant dans la file d'attente d'un hôpital."""
+    first_ticket = db.query(QueueTicket).filter(
+        QueueTicket.hospital_id == hospital_id,
+        QueueTicket.department == department, 
+        QueueTicket.status == "waiting"
+    ).order_by(QueueTicket.timestamp).first()
     
     if not first_ticket:
         return {"status": "empty", "message": "Aucun patient en attente."}
@@ -111,17 +126,21 @@ async def call_next_patient(department: str, request: CallNextRequest, db: Sessi
         calledTime=called_time.isoformat(),
         waitMinutes=wait_minutes,
         treatedBy=request.doctorName,
-        status="treated"
+        status="treated",
+        hospital_id=hospital_id
     )
     db.add(history)
     db.commit()
     
-    # Recalculer les positions
-    remaining_patients = db.query(QueueTicket).filter(QueueTicket.department == department, QueueTicket.status == "waiting").order_by(QueueTicket.timestamp).all()
+    remaining_patients = db.query(QueueTicket).filter(
+        QueueTicket.hospital_id == hospital_id,
+        QueueTicket.department == department, 
+        QueueTicket.status == "waiting"
+    ).order_by(QueueTicket.timestamp).all()
+    
     for index, patient in enumerate(remaining_patients):
         patient.position = index + 1
         patient.estimatedWaitTime = patient.position * 15
-        # Envoyer notification WebSocket (async)
         await manager.send_personal_message({
             "type": "queue_update",
             "position": patient.position,
@@ -130,7 +149,6 @@ async def call_next_patient(department: str, request: CallNextRequest, db: Sessi
         
     db.commit()
 
-    # Envoyer la notification au patient appelé
     await manager.send_personal_message({
         "type": "queue_update",
         "position": 0,
@@ -138,7 +156,7 @@ async def call_next_patient(department: str, request: CallNextRequest, db: Sessi
         "message": "C'est votre tour !"
     }, first_ticket.id)
     
-    await manager.broadcast_to_dashboard({"type": "queue_update", "department": department})
+    await manager.broadcast_to_dashboard({"type": "queue_update", "department": department, "hospital_id": hospital_id})
     
     return {
         "status": "called",
@@ -155,17 +173,19 @@ async def call_next_patient(department: str, request: CallNextRequest, db: Sessi
     }
 
 # ══════════════════════════════════════
-#  Historique des patients traités
+#  Historique
 # ══════════════════════════════════════
-
-@router.get("/history/all")
-async def get_all_history(db: Session = Depends(get_db)):
-    history = db.query(HistoryEntry).order_by(HistoryEntry.calledTime.desc()).all()
+@router.get("/history/all/{hospital_id}")
+async def get_all_history(hospital_id: str, db: Session = Depends(get_db)):
+    history = db.query(HistoryEntry).filter(HistoryEntry.hospital_id == hospital_id).order_by(HistoryEntry.calledTime.desc()).all()
     return [{"id": h.id, "ticketNumber": h.ticketNumber, "department": h.department, "calledTime": h.calledTime, "waitMinutes": h.waitMinutes, "treatedBy": h.treatedBy} for h in history]
 
-@router.get("/history/{department}")
-async def get_department_history(department: str, db: Session = Depends(get_db)):
-    history = db.query(HistoryEntry).filter(HistoryEntry.department == department).order_by(HistoryEntry.calledTime.desc()).all()
+@router.get("/history/{hospital_id}/{department}")
+async def get_department_history(hospital_id: str, department: str, db: Session = Depends(get_db)):
+    history = db.query(HistoryEntry).filter(
+        HistoryEntry.hospital_id == hospital_id,
+        HistoryEntry.department == department
+    ).order_by(HistoryEntry.calledTime.desc()).all()
     return [{"id": h.id, "ticketNumber": h.ticketNumber, "department": h.department, "calledTime": h.calledTime, "waitMinutes": h.waitMinutes, "treatedBy": h.treatedBy} for h in history]
 
 @router.get("/history/patient/{ticket_id}")
@@ -192,23 +212,29 @@ async def get_patient_record(ticket_id: str, db: Session = Depends(get_db)):
     }
 
 # ══════════════════════════════════════
-#  Statistiques en temps réel
+#  Statistiques
 # ══════════════════════════════════════
-
 @router.get("/statistics/overview")
-async def get_statistics(db: Session = Depends(get_db)):
-    total_waiting = db.query(QueueTicket).filter(QueueTicket.status == "waiting").count()
-    total_treated = db.query(HistoryEntry).count()
+async def get_statistics(hospital_id: Optional[str] = None, db: Session = Depends(get_db)):
+    q_waiting = db.query(QueueTicket).filter(QueueTicket.status == "waiting")
+    q_treated = db.query(HistoryEntry)
     
-    total_wait_time = db.query(func.sum(HistoryEntry.waitMinutes)).scalar() or 0
+    if hospital_id:
+        q_waiting = q_waiting.filter(QueueTicket.hospital_id == hospital_id)
+        q_treated = q_treated.filter(HistoryEntry.hospital_id == hospital_id)
+        
+    total_waiting = q_waiting.count()
+    total_treated = q_treated.count()
+    
+    total_wait_time = q_treated.with_entities(func.sum(HistoryEntry.waitMinutes)).scalar() or 0
     avg_wait = round(total_wait_time / total_treated, 1) if total_treated > 0 else 0
     
-    deps = db.query(QueueTicket.department).distinct().all()
+    deps = q_waiting.with_entities(QueueTicket.department).distinct().all()
     dept_stats = []
     
     for (dept_name,) in deps:
-        waiting = db.query(QueueTicket).filter(QueueTicket.department == dept_name, QueueTicket.status == "waiting").count()
-        treated = db.query(HistoryEntry).filter(HistoryEntry.department == dept_name).count()
+        waiting = q_waiting.filter(QueueTicket.department == dept_name).count()
+        treated = q_treated.filter(HistoryEntry.department == dept_name).count()
         dept_stats.append({
             "name": dept_name,
             "waiting": waiting,
@@ -219,7 +245,7 @@ async def get_statistics(db: Session = Depends(get_db)):
     busiest = max(dept_stats, key=lambda d: d["total"]) if dept_stats else None
     
     return {
-        "totalTicketsCreated": db.query(QueueTicket).count(),
+        "totalTicketsCreated": q_waiting.count() + q_treated.count(), # Approx
         "totalPatientsTreated": total_treated,
         "totalWaiting": total_waiting,
         "averageWaitMinutes": avg_wait,
@@ -229,9 +255,8 @@ async def get_statistics(db: Session = Depends(get_db)):
     }
 
 # ══════════════════════════════════════
-#  WebSocket temps réel
+#  WebSocket
 # ══════════════════════════════════════
-
 @router.websocket("/ws/dashboard")
 async def websocket_dashboard(websocket: WebSocket):
     await manager.connect_dashboard(websocket)
@@ -247,7 +272,6 @@ async def websocket_dashboard(websocket: WebSocket):
 async def websocket_endpoint(websocket: WebSocket, ticket_id: str):
     await manager.connect(websocket, ticket_id)
     try:
-        # We manually create a session here to avoid keeping a connection open forever
         db = SessionLocal()
         ticket = db.query(QueueTicket).filter(QueueTicket.id == ticket_id, QueueTicket.status == "waiting").first()
         if ticket:

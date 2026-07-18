@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from core.database import get_db
-from models.schema import Availability, Appointment
+from models.schema import Availability, Appointment, User
 
 router = APIRouter()
 
@@ -65,6 +65,25 @@ def delete_availability(avail_id: str, db: Session = Depends(get_db)):
     db.delete(avail)
     db.commit()
     return {"message": "Créneau supprimé avec succès"}
+
+# ══════════════════════════════════════
+#  Médecins
+# ══════════════════════════════════════
+@router.get("/doctors")
+def get_doctors(hospital_id: Optional[str] = None, department: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(User).filter(User.role != "Agent Médical", User.role != "Pharmacien")
+    if hospital_id:
+        query = query.filter(User.hospital_id == hospital_id)
+    if department:
+        query = query.filter(User.department == department)
+    doctors = query.all()
+    # Mask password
+    result = []
+    for doc in doctors:
+        doc_dict = doc.__dict__.copy()
+        doc_dict.pop("password", None)
+        result.append(doc_dict)
+    return {"data": result}
 
 # ══════════════════════════════════════
 #  Rendez-vous (Patients & Médecins)
