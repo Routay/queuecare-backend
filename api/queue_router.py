@@ -57,6 +57,57 @@ async def create_ticket(request: TicketRequest, db: Session = Depends(get_db)):
         "status": ticket.status
     }
 
+# ══════════════════════════════════════
+#  Statistiques  ← DOIT être défini AVANT les routes dynamiques /{hospital_id}/...
+# ══════════════════════════════════════
+@router.get("/statistics/overview")
+async def get_statistics(hospital_id: Optional[str] = None, db: Session = Depends(get_db)):
+    q_waiting = db.query(QueueTicket).filter(QueueTicket.status == "waiting")
+    q_treated = db.query(HistoryEntry)
+    
+    if hospital_id:
+        q_waiting = q_waiting.filter(QueueTicket.hospital_id == hospital_id)
+        q_treated = q_treated.filter(HistoryEntry.hospital_id == hospital_id)
+        
+    total_waiting = q_waiting.count()
+    total_treated = q_treated.count()
+    
+    total_wait_time = q_treated.with_entities(func.sum(HistoryEntry.waitMinutes)).scalar() or 0
+    avg_wait = round(total_wait_time / total_treated, 1) if total_treated > 0 else 0
+    
+    deps = q_waiting.with_entities(QueueTicket.department).distinct().all()
+    dept_stats = []
+    
+    for (dept_name,) in deps:
+        waiting = db.query(QueueTicket).filter(
+            QueueTicket.status == "waiting",
+            QueueTicket.department == dept_name,
+            *([QueueTicket.hospital_id == hospital_id] if hospital_id else [])
+        ).count()
+        treated = db.query(HistoryEntry).filter(
+            HistoryEntry.department == dept_name,
+            *([HistoryEntry.hospital_id == hospital_id] if hospital_id else [])
+        ).count()
+        dept_stats.append({
+            "name": dept_name,
+            "waiting": waiting,
+            "treated": treated,
+            "total": waiting + treated
+        })
+        
+    busiest = max(dept_stats, key=lambda d: d["total"]) if dept_stats else None
+    total_created = total_waiting + total_treated
+    
+    return {
+        "totalTicketsCreated": total_created,
+        "totalPatientsTreated": total_treated,
+        "totalWaiting": total_waiting,
+        "averageWaitMinutes": avg_wait,
+        "busiestDepartment": busiest["name"] if busiest and busiest["total"] > 0 else "—",
+        "departmentStats": dept_stats,
+        "timestamp": datetime.now().isoformat()
+    }
+
 @router.get("/{hospital_id}/{department}")
 async def get_queue(hospital_id: str, department: str, db: Session = Depends(get_db)):
     """Retourne la liste des patients en attente pour un hôpital et service donné."""
@@ -211,48 +262,7 @@ async def get_patient_record(ticket_id: str, db: Session = Depends(get_db)):
         } for p in prescriptions]
     }
 
-# ══════════════════════════════════════
-#  Statistiques
-# ══════════════════════════════════════
-@router.get("/statistics/overview")
-async def get_statistics(hospital_id: Optional[str] = None, db: Session = Depends(get_db)):
-    q_waiting = db.query(QueueTicket).filter(QueueTicket.status == "waiting")
-    q_treated = db.query(HistoryEntry)
-    
-    if hospital_id:
-        q_waiting = q_waiting.filter(QueueTicket.hospital_id == hospital_id)
-        q_treated = q_treated.filter(HistoryEntry.hospital_id == hospital_id)
-        
-    total_waiting = q_waiting.count()
-    total_treated = q_treated.count()
-    
-    total_wait_time = q_treated.with_entities(func.sum(HistoryEntry.waitMinutes)).scalar() or 0
-    avg_wait = round(total_wait_time / total_treated, 1) if total_treated > 0 else 0
-    
-    deps = q_waiting.with_entities(QueueTicket.department).distinct().all()
-    dept_stats = []
-    
-    for (dept_name,) in deps:
-        waiting = q_waiting.filter(QueueTicket.department == dept_name).count()
-        treated = q_treated.filter(HistoryEntry.department == dept_name).count()
-        dept_stats.append({
-            "name": dept_name,
-            "waiting": waiting,
-            "treated": treated,
-            "total": waiting + treated
-        })
-        
-    busiest = max(dept_stats, key=lambda d: d["total"]) if dept_stats else None
-    
-    return {
-        "totalTicketsCreated": q_waiting.count() + q_treated.count(), # Approx
-        "totalPatientsTreated": total_treated,
-        "totalWaiting": total_waiting,
-        "averageWaitMinutes": avg_wait,
-        "busiestDepartment": busiest["name"] if busiest and busiest["total"] > 0 else "—",
-        "departmentStats": dept_stats,
-        "timestamp": datetime.now().isoformat()
-    }
+# (Route /statistics/overview déplacée en tête de fichier pour éviter le conflit avec /{hospital_id}/{department})
 
 # ══════════════════════════════════════
 #  WebSocket
