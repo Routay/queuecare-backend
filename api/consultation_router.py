@@ -137,3 +137,104 @@ async def check_availability(db: Session = Depends(get_db)):
             if item.inStock:
                 availability[name]["available"] = True
     return list(availability.values())
+
+
+# ══════════════════════════════════════
+#  Endpoints Pharmacie — Workflow de délivrance
+# ══════════════════════════════════════
+
+@router.get("/prescriptions/pharmacy/{pharmacy_id}")
+async def get_pharmacy_prescriptions(
+    pharmacy_id: int,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Retourne toutes les ordonnances adressées à une pharmacie.
+    Filtre optionnel par statut : 'pending', 'delivered', 'cancelled'.
+    """
+    query = db.query(Prescription)
+    
+    if status:
+        query = query.filter(Prescription.status == status)
+    
+    prescriptions = query.all()
+    
+    # Enrichir chaque ordonnance avec la disponibilité des médicaments en stock
+    results = []
+    for p in prescriptions:
+        medicines_detail = []
+        all_available = True
+        
+        for med in p.medicines:
+            stock = db.query(Medicine).filter(
+                Medicine.pharmacy_id == pharmacy_id,
+                Medicine.name == med.name
+            ).first()
+            
+            available = stock is not None and stock.inStock and stock.quantity >= med.quantity
+            if not available:
+                all_available = False
+            
+            medicines_detail.append({
+                "name": med.name,
+                "quantity": med.quantity,
+                "dosage": med.dosage,
+                "inStock": available,
+                "stockQuantity": stock.quantity if stock else 0
+            })
+        
+        results.append({
+            "id": p.id,
+            "ticketId": p.ticketId,
+            "doctorName": p.doctorName,
+            "date": p.date,
+            "notes": p.notes,
+            "status": p.status,
+            "deliveredAt": p.deliveredAt,
+            "deliveredBy": p.deliveredBy,
+            "medicines": medicines_detail,
+            "allMedicinesAvailable": all_available
+        })
+    
+    return {
+        "pharmacyId": pharmacy_id,
+        "total": len(results),
+        "pending": sum(1 for r in results if r["status"] == "pending"),
+        "delivered": sum(1 for r in results if r["status"] == "delivered"),
+        "data": results
+    }
+
+
+class StatusUpdate(BaseModel):
+    status: str  # 'pending', 'delivered', 'cancelled'
+    note: Optional[str] = None
+
+
+@router.put("/prescriptions/{prescription_id}/status")
+async def update_prescription_status(
+    prescription_id: str,
+    request: StatusUpdate,
+    db: Session = Depends(get_db)
+):
+    """Mettre à jour le statut d'une ordonnance (confirmée, annulée, etc.)."""
+    if request.status not in ["pending", "delivered", "cancelled", "confirmed"]:
+        raise HTTPException(status_code=400, detail="Statut invalide.")
+    
+    prescription = db.query(Prescription).filter(Prescription.id == prescription_id).first()
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Ordonnance introuvable.")
+    
+    if prescription.status == "delivered" and request.status != "cancelled":
+        raise HTTPException(status_code=400, detail="Une ordonnance déjà délivrée ne peut pas être modifiée.")
+    
+    prescription.status = request.status
+    if request.status == "delivered":
+        prescription.deliveredAt = datetime.now().isoformat()
+    
+    db.commit()
+    return {
+        "message": f"Ordonnance mise à jour : statut '{request.status}'.",
+        "prescriptionId": prescription_id,
+        "newStatus": request.status
+    }
