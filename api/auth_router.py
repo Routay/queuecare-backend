@@ -37,7 +37,8 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
         "fullName": user.fullName,
         "role": user.role,
         "department": user.department,
-        "avatar": user.avatar
+        "avatar": user.avatar,
+        "hospital_id": user.hospital_id
     }
     
     # Générer un token de session simple
