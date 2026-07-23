@@ -19,6 +19,44 @@ class TransactionLog(BaseModel):
     quantity: int
     user: str
 
+class PharmacyCreate(BaseModel):
+    name: str
+    address: str
+    latitude: float = 0.0
+    longitude: float = 0.0
+
+@router.post("/")
+async def create_pharmacy(request: PharmacyCreate, db: Session = Depends(get_db)):
+    """Créer une nouvelle pharmacie."""
+    new_pharmacy = Pharmacy(
+        name=request.name,
+        address=request.address,
+        latitude=request.latitude,
+        longitude=request.longitude
+    )
+    db.add(new_pharmacy)
+    db.commit()
+    db.refresh(new_pharmacy)
+    return {
+        "message": "Pharmacie créée avec succès.",
+        "data": {
+            "id": new_pharmacy.id,
+            "name": new_pharmacy.name,
+            "address": new_pharmacy.address
+        }
+    }
+
+@router.delete("/{pharmacy_id}")
+async def delete_pharmacy(pharmacy_id: int, db: Session = Depends(get_db)):
+    """Supprimer une pharmacie."""
+    pharmacy = db.query(Pharmacy).filter(Pharmacy.id == pharmacy_id).first()
+    if not pharmacy:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+    
+    db.delete(pharmacy)
+    db.commit()
+    return {"message": "Pharmacie supprimée avec succès."}
+
 @router.get("/")
 async def get_pharmacies(db: Session = Depends(get_db)):
     pharmacies = db.query(Pharmacy).all()

@@ -65,3 +65,85 @@ async def get_current_user(token: str = ""):
     if token not in active_tokens:
         raise HTTPException(status_code=401, detail="Token invalide ou expiré.")
     return active_tokens[token]
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    fullName: str
+    role: str
+    department: str
+    avatar: str
+    hospital_id: str | None = None
+
+@router.post("/register")
+async def register_user(request: UserCreate, db: Session = Depends(get_db)):
+    """Créer un nouvel utilisateur (Agent, Médecin, etc.)."""
+    existing_user = db.query(User).filter(User.username == request.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Ce nom d'utilisateur est déjà pris.")
+    
+    # Generate unique ID based on role
+    prefix = "doc-" if "Médecin" in request.role or request.role in ["Cardiologue", "Pédiatre", "Ophtalmologue"] else "agent-"
+    new_id = f"{prefix}{str(uuid.uuid4())[:6]}"
+    
+    new_user = User(
+        id=new_id,
+        username=request.username,
+        password=request.password,
+        fullName=request.fullName,
+        role=request.role,
+        department=request.department,
+        avatar=request.avatar,
+        hospital_id=request.hospital_id
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {
+        "message": "Utilisateur créé avec succès.",
+        "user": {
+            "id": new_user.id,
+            "username": new_user.username,
+            "fullName": new_user.fullName,
+            "role": new_user.role,
+            "department": new_user.department,
+            "hospital_id": new_user.hospital_id
+        }
+    }
+
+@router.get("/users")
+async def get_users(hospital_id: str | None = None, role: str | None = None, db: Session = Depends(get_db)):
+    """Retourne la liste des utilisateurs, optionnellement filtrée par hôpital ou rôle."""
+    query = db.query(User)
+    if hospital_id:
+        query = query.filter(User.hospital_id == hospital_id)
+    if role:
+        query = query.filter(User.role == role)
+        
+    users = query.all()
+    return {
+        "data": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "fullName": u.fullName,
+                "role": u.role,
+                "department": u.department,
+                "avatar": u.avatar,
+                "hospital_id": u.hospital_id
+            } for u in users
+        ]
+    }
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str, db: Session = Depends(get_db)):
+    """Supprimer un utilisateur."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    
+    db.delete(user)
+    db.commit()
+    return {"message": f"Utilisateur {user.fullName} supprimé avec succès."}

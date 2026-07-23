@@ -22,8 +22,14 @@ def seed_database():
             db.add_all(hospitals)
             db.commit()
 
+        # Ensure admin exists
+        admin = db.query(schema.User).filter(schema.User.username == "admin").first()
+        if not admin:
+            db.add(schema.User(id="admin-001", username="admin", password="admin2026", fullName="Administrateur Système", role="Admin", department="Administration", avatar="AD", hospital_id=None))
+            db.commit()
+
         # Seed Users
-        if db.query(schema.User).count() == 0:
+        if db.query(schema.User).filter(schema.User.role != "Admin").count() == 0:
             users_to_add = [
                 # Médecins
                 schema.User(id="doc-001", username="dr.diallo", password="queuecare2026", fullName="Dr. Mamadou Diallo", role="Médecin Chef", department="Consultation Générale", avatar="MD", hospital_id="hosp-fann"),
