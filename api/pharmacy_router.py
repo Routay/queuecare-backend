@@ -25,6 +25,39 @@ class PharmacyCreate(BaseModel):
     latitude: float = 0.0
     longitude: float = 0.0
 
+class PharmacyUpdate(BaseModel):
+    name: str | None = None
+    address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+@router.put("/{pharmacy_id}")
+async def update_pharmacy(pharmacy_id: int, request: PharmacyUpdate, db: Session = Depends(get_db)):
+    """Modifier les informations d'une pharmacie."""
+    pharmacy = db.query(Pharmacy).filter(Pharmacy.id == pharmacy_id).first()
+    if not pharmacy:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+    
+    if request.name is not None:
+        pharmacy.name = request.name
+    if request.address is not None:
+        pharmacy.address = request.address
+    if request.latitude is not None:
+        pharmacy.latitude = request.latitude
+    if request.longitude is not None:
+        pharmacy.longitude = request.longitude
+    
+    db.commit()
+    db.refresh(pharmacy)
+    return {
+        "message": "Pharmacie mise à jour avec succès.",
+        "data": {
+            "id": pharmacy.id,
+            "name": pharmacy.name,
+            "address": pharmacy.address
+        }
+    }
+
 @router.post("/")
 async def create_pharmacy(request: PharmacyCreate, db: Session = Depends(get_db)):
     """Créer une nouvelle pharmacie."""

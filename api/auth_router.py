@@ -137,6 +137,56 @@ async def get_users(hospital_id: str | None = None, role: str | None = None, db:
         ]
     }
 
+class UserUpdate(BaseModel):
+    username: str | None = None
+    password: str | None = None
+    fullName: str | None = None
+    role: str | None = None
+    department: str | None = None
+    avatar: str | None = None
+    hospital_id: str | None = None
+
+@router.put("/users/{user_id}")
+async def update_user(user_id: str, request: UserUpdate, db: Session = Depends(get_db)):
+    """Modifier les informations d'un utilisateur."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    
+    # Check if username is being changed and is unique
+    if request.username is not None and request.username != user.username:
+        existing = db.query(User).filter(User.username == request.username).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Ce nom d'utilisateur est déjà pris.")
+        user.username = request.username
+    
+    if request.password is not None:
+        user.password = request.password
+    if request.fullName is not None:
+        user.fullName = request.fullName
+        user.avatar = request.fullName[:2].upper()
+    if request.role is not None:
+        user.role = request.role
+    if request.department is not None:
+        user.department = request.department
+    if request.hospital_id is not None:
+        user.hospital_id = request.hospital_id
+    
+    db.commit()
+    db.refresh(user)
+    return {
+        "message": "Utilisateur mis à jour avec succès.",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "fullName": user.fullName,
+            "role": user.role,
+            "department": user.department,
+            "avatar": user.avatar,
+            "hospital_id": user.hospital_id
+        }
+    }
+
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: str, db: Session = Depends(get_db)):
     """Supprimer un utilisateur."""
@@ -147,3 +197,4 @@ async def delete_user(user_id: str, db: Session = Depends(get_db)):
     db.delete(user)
     db.commit()
     return {"message": f"Utilisateur {user.fullName} supprimé avec succès."}
+

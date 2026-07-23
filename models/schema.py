@@ -94,6 +94,11 @@ class Prescription(Base):
     deliveredAt = Column(String, nullable=True)
     deliveredBy = Column(String, nullable=True)
     
+    pharmacy_id = Column(Integer, ForeignKey("pharmacies.id"), nullable=True)
+    deliveryMethod = Column(String, nullable=True)
+    deliveryAddress = Column(String, nullable=True)
+    orderedAt = Column(String, nullable=True)
+    
     medicines = relationship("PrescriptionMedicine", back_populates="prescription", cascade="all, delete-orphan")
 
 class PrescriptionMedicine(Base):

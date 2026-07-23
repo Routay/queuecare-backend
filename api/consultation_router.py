@@ -90,7 +90,11 @@ async def get_patient_prescriptions(ticket_id: str, db: Session = Depends(get_db
             "medicines": [{"name": m.name, "quantity": m.quantity, "dosage": m.dosage} for m in p.medicines],
             "status": p.status,
             "deliveredAt": p.deliveredAt,
-            "deliveredBy": p.deliveredBy
+            "deliveredBy": p.deliveredBy,
+            "pharmacy_id": p.pharmacy_id,
+            "deliveryMethod": p.deliveryMethod,
+            "deliveryAddress": p.deliveryAddress,
+            "orderedAt": p.orderedAt
         } for p in prescriptions
     ]
 
@@ -157,7 +161,9 @@ async def get_pharmacy_prescriptions(
     
     if status:
         query = query.filter(Prescription.status == status)
-    
+        if status == 'ordered':
+            query = query.filter(Prescription.pharmacy_id == pharmacy_id)
+            
     prescriptions = query.all()
     
     # Enrichir chaque ordonnance avec la disponibilité des médicaments en stock
@@ -238,3 +244,79 @@ async def update_prescription_status(
         "prescriptionId": prescription_id,
         "newStatus": request.status
     }
+
+# ══════════════════════════════════════
+#  Endpoints Patient — Commandes
+# ══════════════════════════════════════
+
+@router.get("/prescriptions/{prescription_id}/pharmacies")
+async def get_capable_pharmacies(prescription_id: str, db: Session = Depends(get_db)):
+    """Retourne la liste des pharmacies capables de fournir cette ordonnance, avec leurs stocks et coordonnées."""
+    prescription = db.query(Prescription).filter(Prescription.id == prescription_id).first()
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Ordonnance introuvable.")
+    
+    all_pharmacies = db.query(Pharmacy).all()
+    capable_pharmacies = []
+
+    for pharmacy in all_pharmacies:
+        all_available = True
+        medicines_detail = []
+        for med in prescription.medicines:
+            stock = db.query(Medicine).filter(
+                Medicine.pharmacy_id == pharmacy.id,
+                Medicine.name == med.name
+            ).first()
+            
+            available = stock is not None and stock.inStock and stock.quantity >= med.quantity
+            if not available:
+                all_available = False
+            
+            medicines_detail.append({
+                "name": med.name,
+                "requested": med.quantity,
+                "inStock": available,
+                "stockQuantity": stock.quantity if stock else 0
+            })
+            
+        if all_available:
+            capable_pharmacies.append({
+                "pharmacy": {
+                    "id": pharmacy.id,
+                    "name": pharmacy.name,
+                    "address": pharmacy.address,
+                    "latitude": pharmacy.latitude,
+                    "longitude": pharmacy.longitude
+                },
+                "medicines_detail": medicines_detail
+            })
+            
+    return capable_pharmacies
+
+class OrderRequest(BaseModel):
+    pharmacyId: int
+    deliveryMethod: str  # 'pickup' or 'delivery'
+    deliveryAddress: Optional[str] = None
+
+@router.post("/prescriptions/{prescription_id}/order")
+async def place_order(prescription_id: str, request: OrderRequest, db: Session = Depends(get_db)):
+    """Passe commande pour une ordonnance vers une pharmacie spécifique."""
+    prescription = db.query(Prescription).filter(Prescription.id == prescription_id).first()
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Ordonnance introuvable.")
+    
+    pharmacy = db.query(Pharmacy).filter(Pharmacy.id == request.pharmacyId).first()
+    if not pharmacy:
+        raise HTTPException(status_code=404, detail="Pharmacie introuvable.")
+        
+    if prescription.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Impossible de commander. Statut actuel: {prescription.status}")
+        
+    prescription.pharmacy_id = request.pharmacyId
+    prescription.deliveryMethod = request.deliveryMethod
+    prescription.deliveryAddress = request.deliveryAddress
+    prescription.orderedAt = datetime.now().isoformat()
+    prescription.status = "ordered"
+    
+    db.commit()
+    return {"message": "Commande passée avec succès", "prescriptionId": prescription.id}
